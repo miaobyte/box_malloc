@@ -25,7 +25,6 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 target_link_libraries(box_malloc block_malloc)
 
-
 add_subdirectory(test)
 
 # 安装目标和头文件

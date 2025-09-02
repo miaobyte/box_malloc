@@ -150,8 +150,9 @@ int box_init(void *metaptr, size_t buddysize, void *boxstart, size_t box_size)
         LOG("Failed to allocate root node");
         return -1;
     }
-    box_format(meta, root_boxhead, rounded_size_t.level, rounded_size_t.multiple, -1);
 
+    box_format(meta, root_boxhead, rounded_size_t.level, rounded_size_t.multiple, -1);
+    LOG("box_init success");
     return 0;
 }
 static uint8_t box_continuous_max(box_head *node)
@@ -200,6 +201,7 @@ static void box_format(box_meta *meta, box_head *node, uint8_t objlevel, uint8_t
 
     // parent
     node->parent = parent_id;
+   
 }
 static obj_usage box_max_obj_capacity(box_head *node)
 {
@@ -373,6 +375,7 @@ static uint64_t box_find_alloc(box_meta *meta, box_head *node, box_head *parent,
             // 目标体量属于当前level
 
             uint8_t target_slot = put_slots(meta, node, objsize);
+            LOG("Allocated at level %d, slot %d * %d", node->objlevel, target_slot, objsize.multiple);
             return obj_offset((obj_usage){
                 .level = node->objlevel,
                 .multiple = target_slot,
