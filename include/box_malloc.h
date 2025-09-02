@@ -3,8 +3,8 @@
 
 #include <stddef.h>
 
-int box_init(void *meta,size_t buddysize, void *boxstart, size_t box_size);
-void *box_alloc(void *meta, size_t size);
-void box_free(void *meta, void *ptr);
+int box_init(void *metaptr,const size_t buddysize,const size_t box_size);
+void *box_alloc(void *metaptr,void *box_start,const size_t size);
+void box_free(void *metaptr,void *box_start,const void *ptr);
 
 #endif // BOX_MALLOC_H

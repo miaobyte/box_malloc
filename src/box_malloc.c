@@ -5,82 +5,51 @@
 #include <block_malloc/block_malloc.h>
 
 #include "box_malloc.h"
+#include "obj_offset.h"
 #include "logutil.h"
 
-typedef struct
-{
-    uint8_t level : 4;    // obj最大的level
-    uint8_t multiple : 4; // obj最长连续可用的slots [1,15],如果==0,说明无可用
-} __attribute__((packed)) obj_usage;
+/*
+内存布局示意图：
 
-static uint64_t int_pow(uint64_t base, uint32_t exp)
-{
-    uint64_t result = 1;
-    for (uint32_t i = 0; i < exp; i++)
-    {
-        result *= base;
-    }
-    return result;
-}
-static uint32_t int_log(uint64_t n, uint32_t base)
-{
-    uint32_t log = 0;
-    while (n >= base)
-    {
-        n /= base;
-        log++;
-    }
-    return log;
-}
+meta区：
++-------------------+  box_meta_t 描述整个伙伴系统
+|   +-------------+ |
+|   | buddysize    | |  伙伴系统的总大小
+|   | box_size     | |  box区的总大小
+|   | blocks_meta_t| |  blocks的元数据
+|   +-------------+ |  blocks区，存储 block_t 和 box_head_t
+|   | block_t0    | |  每个 block 的元数据
+|   | box_head_t[0] | |  描述第0个 box 的状态和结构
+|   +-------------+ |
+|   | block_t1    | |  每个 block 的元数据
+|   | box_head_t[1] | |  描述第1个 box 的状态和结构
+|   +-------------+ |
+|   | block_t2    | |  每个 block 的元数据
+|   | box_head_t[2] | |  描述第2个 box 的状态和结构
+|   | ...         | |
+|   +-------------+ |
++-------------------+  <-- meta区结束，box区开始
 
-static obj_usage align_to(uint64_t n)
-{
-    uint32_t base = 16;
-    obj_usage result = {0, 0};
-    if (n < base)
-    {
-        result.multiple = n;
-        return result;
-    }
+box区：
++-------------------+  <-- 起始地址 (box_root)
+|   box 数据区      |  存储实际分配的对象，不包含任何 meta 信息
+|                   |
+|                   |
++-------------------+  <-- box区结束
 
-    result.level = int_log(n, base);
-    uint64_t minbase = int_pow(base, result.level);
+说明：
+1. meta区和 box区 地址互相独立。
+2. meta区存储 box_meta_t 和 blocks 的元数据，用于管理 box 的分配。
+3. box区是实际分配的内存区域，不存储任何元数据。
+*/
 
-    result.multiple = (n + minbase - 1) / minbase;
-    if (result.multiple >= base)
-    {
-        result.multiple = 1;
-        result.level++;
-        minbase = int_pow(base, result.level);
-    }
-    return result;
-}
-
-static int8_t compare_obj_usage(const obj_usage a, obj_usage b)
-{
-    if (a.level != b.level)
-        return a.level - b.level;
-    return a.multiple - b.multiple;
-}
-static uint64_t obj_offset(const obj_usage a)
-{
-    uint64_t offset = 8;
-    for (int i = 0; i < a.level; i++)
-    {
-        offset *= 16;
-    }
-    offset *= (a.multiple);
-    return offset;
-}
 
 typedef struct
 {
     uint64_t buddysize; // 伙伴系统的总size
-    void *rootbox;      // 指向块内存起始位置
     uint64_t box_size;  // 总内存大小，不可变，内存长度必须=16^n*x,n>=1，x=[1,15]
-
     blocks_meta_t blocks;
-} box_meta;
+} box_meta_t;
 
 typedef enum
 {
@@ -94,7 +63,7 @@ typedef struct
 {
     uint8_t state : 2;       // 0=未用（可以分配obj、box）,1=已格式化为box，2=obj
     int8_t continue_max : 6; // 连续的最大空闲obj,[0~16]
-} __attribute__((packed)) box_child;
+} __attribute__((packed)) box_child_t;
 
 typedef struct
 {
@@ -109,16 +78,20 @@ typedef struct
     // obj,childbox usage
     uint8_t avliable_slot;            // 【2，16】
     obj_usage child_max_obj_capacity; // 下层的最大对象容量
-    box_child used_slots[16];
+    box_child_t used_slots[16];
 
     // childbox
     int32_t childs_blockid[16];
 
-} __attribute__((packed)) box_head; //
+} __attribute__((packed)) box_head_t; //
 
-static void box_format(box_meta *meta, box_head *node, uint8_t objlevel, uint8_t avliable_slot, int32_t parent_id);
+static void box_format(box_meta_t *meta, box_head_t *node, uint8_t objlevel, uint8_t avliable_slot, int32_t parent_id);
 
-int box_init(void *metaptr, size_t buddysize, void *boxstart, size_t box_size)
+static void *block_start(void *meta){
+    return meta + sizeof(box_meta_t);
+}
+
+int box_init(void *metaptr,const size_t buddysize,const size_t box_size)
 {
     if (box_size % 8 != 0)
     {
@@ -131,20 +104,20 @@ int box_init(void *metaptr, size_t buddysize, void *boxstart, size_t box_size)
         LOG("box_size must be aligned to 16. Given size: %zu", box_size);
         return -1;
     }
-    box_meta *meta = metaptr;
-    *meta = (box_meta){
+    box_meta_t *meta = metaptr;
+    *meta = (box_meta_t){
         .buddysize = buddysize,
-        .rootbox = boxstart,
         .box_size = box_size,
     };
-    void *block_start = metaptr + sizeof(box_meta);
-    blocks_init(block_start,buddysize - sizeof(box_meta), sizeof(box_head), &meta->blocks);
-    int64_t block_id = blocks_alloc(&meta->blocks); // 分配根节点
+ 
+    blocks_init(&meta->blocks,buddysize - sizeof(box_meta_t), sizeof(box_head_t));
+    int64_t block_id = blocks_alloc(&meta->blocks,block_start(meta)); // 分配根节点
     if(block_id<0){
         LOG("Failed to allocate root block");
         return -1;
     }
-    box_head *root_boxhead = block_data(&meta->blocks, block_id);
+
+    box_head_t *root_boxhead = block_start(meta) + block_data_offset(&meta->blocks, block_id);
     if (!root_boxhead)
     {
         LOG("Failed to allocate root node");
@@ -155,7 +128,7 @@ int box_init(void *metaptr, size_t buddysize, void *boxstart, size_t box_size)
     LOG("box_init success");
     return 0;
 }
-static uint8_t box_continuous_max(box_head *node)
+static uint8_t box_continuous_max(box_head_t *node)
 {
     uint8_t continuous_count = 0;
     uint8_t continuous_max = 0;
@@ -176,7 +149,7 @@ static uint8_t box_continuous_max(box_head *node)
         continuous_max = continuous_count;
     return continuous_max;
 }
-static void box_format(box_meta *meta, box_head *node, uint8_t objlevel, uint8_t avliable_slot, int32_t parent_id)
+static void box_format(box_meta_t *meta, box_head_t *node, uint8_t objlevel, uint8_t avliable_slot, int32_t parent_id)
 {
     node->state = BOX_FORMATTED;
 
@@ -187,7 +160,7 @@ static void box_format(box_meta *meta, box_head *node, uint8_t objlevel, uint8_t
     node->max_obj_capacity = avliable_slot;
     for (int i = 0; i < avliable_slot; i++)
     {
-        node->used_slots[i] = (box_child){
+        node->used_slots[i] = (box_child_t){
             .continue_max = 16,
             .state = BOX_UNUSED,
         };
@@ -203,7 +176,7 @@ static void box_format(box_meta *meta, box_head *node, uint8_t objlevel, uint8_t
     node->parent = parent_id;
    
 }
-static obj_usage box_max_obj_capacity(box_head *node)
+static obj_usage box_max_obj_capacity(box_head_t *node)
 {
     if (node->max_obj_capacity > 0)
     {
@@ -225,7 +198,7 @@ static obj_usage box_max_obj_capacity(box_head *node)
     }
 }
 
-static void update_parent(box_meta *meta, box_head *node, bool slotstate_changed, bool slot_mac_obj_capacity_changed)
+static void update_parent(box_meta_t *meta, box_head_t *node, bool slotstate_changed, bool slot_mac_obj_capacity_changed)
 {
     if (slotstate_changed)
     {
@@ -252,12 +225,12 @@ static void update_parent(box_meta *meta, box_head *node, bool slotstate_changed
                 .level = 0,
                 .multiple = 0};
 
-            box_head *child = NULL;
+            box_head_t *child = NULL;
             for (int i = 0; i < node->avliable_slot; i++)
             {
                 if (node->used_slots[i].state == BOX_FORMATTED)
                 {
-                    child = block_data(&meta->blocks, node->childs_blockid[i]);
+                    child = block_start(meta) + block_data_offset(&meta->blocks, node->childs_blockid[i]);
                     if (!child)
                     {
                         LOG("Error: Child node should not be NULL");
@@ -284,13 +257,13 @@ static void update_parent(box_meta *meta, box_head *node, bool slotstate_changed
     {
         if (node->parent >= 0)
         {
-            box_head *parent = block_data(&meta->blocks, node->parent);
+            box_head_t *parent = block_start(meta) + block_data_offset(&meta->blocks, node->parent);
             update_parent(meta, parent, slotstate_changed, slot_mac_obj_capacity_changed);
         }
     }
 }
 
-static uint8_t put_slots(box_meta *meta, box_head *node, obj_usage objsize)
+static uint8_t put_slots(box_meta_t *meta, box_head_t *node, obj_usage objsize)
 {
     uint8_t target_slot = 0;
     uint8_t continuous_count = 0;
@@ -347,7 +320,7 @@ static uint8_t put_slots(box_meta *meta, box_head *node, obj_usage objsize)
     {
         // 发生变化，递归更新parent的child
         node->max_obj_capacity = continuous_max;
-        box_head *parent = block_data(&meta->blocks, node->parent);
+        box_head_t *parent = block_start(meta) + block_data_offset(&meta->blocks, node->parent);
         update_parent(meta, parent, false, true);
     }
     return target_slot;
@@ -361,7 +334,7 @@ box内存分配模型，最小单元为8byte，按16为比例分割和分配内�
 meta区，存放box_meta和box_head数组
 data区，存放实际的box数据，完全分配给obj（需要向上对齐），不会存放任何结构体的meta信息
 */
-static uint64_t box_find_alloc(box_meta *meta, box_head *node, box_head *parent, obj_usage objsize)
+static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *parent, obj_usage objsize)
 {
     if (!node)
     {
@@ -384,21 +357,21 @@ static uint64_t box_find_alloc(box_meta *meta, box_head *node, box_head *parent,
         else if (objsize.level < node->objlevel)
         {
             // 目标体量<当前level，查找子节点
-            box_head *child = NULL;
+            box_head_t *child = NULL;
             for (int i = 0; i < node->avliable_slot; i++)
             {
                 if (node->childs_blockid[i] < 0)
                 {
                     // 需要分配出来
-                    int64_t child_block_id = blocks_alloc(&(meta->blocks));
+                    int64_t child_block_id = blocks_alloc(&(meta->blocks), block_start(meta));
                     if(child_block_id<0){
                         LOG("Failed to allocate root block");
                         return -1;
                     }
                     node->childs_blockid[i] = child_block_id;
-                    child = block_data(&meta->blocks, child_block_id);
-                    
-                    int64_t cur_block_id = block_bydata(node);
+                    child = block_start(meta) + block_data_offset(&meta->blocks, child_block_id);
+
+                    int64_t cur_block_id =   block_id_bydataoffset(&meta->blocks, (void*)node - block_start(meta));
                     box_format(meta, child, node->objlevel - 1, 16, cur_block_id);
 
                     // 更新node中的child信息
@@ -412,7 +385,7 @@ static uint64_t box_find_alloc(box_meta *meta, box_head *node, box_head *parent,
                 }
                 else
                 {
-                    child = block_data(&meta->blocks, node->childs_blockid[i]);
+                    child = block_start(meta) + block_data_offset(&meta->blocks, node->childs_blockid[i]);
                 }
 
                 obj_usage child_max = box_max_obj_capacity(child);
@@ -436,12 +409,12 @@ static uint64_t box_find_alloc(box_meta *meta, box_head *node, box_head *parent,
     return BOX_FAILED;
 }
 
-void *box_alloc(void *metaptr, size_t size)
+void *box_alloc(void *metaptr,void *box_start,const size_t size)
 {
     obj_usage aligned_objsize = align_to((size + 8 - 1) / 8);
 
-    box_meta *meta = metaptr;
-    box_head *root = block_data(&meta->blocks, 0);
+    box_meta_t *meta = metaptr;
+    box_head_t *root = block_start(meta) + block_data_offset(&meta->blocks, 0);
     if (!root)
     {
         LOG("Error: Root is NULL");
@@ -459,17 +432,17 @@ void *box_alloc(void *metaptr, size_t size)
     if (offset == BOX_FAILED)
         return NULL;
 
-    return meta->rootbox + offset;
+    return box_start + offset;
 }
-void box_free(void *metaptr, void *ptr)
+void box_free(void *metaptr,void *box_start,const void *ptr)
 {
-    box_meta *meta = metaptr;
+    box_meta_t *meta = metaptr;
 
     // 计算偏移量
-    uint64_t offset = ((uint8_t *)ptr - (uint8_t *)meta->rootbox) / 8;
+    uint64_t offset = ((uint8_t *)ptr - (uint8_t *)box_start) / 8;
 
     // 获取根节点
-    box_head *node = block_data(&meta->blocks, 0);
+    box_head_t *node = block_start(meta) + block_data_offset(&meta->blocks, 0);
     if (!node)
     {
         LOG("Error: Root node is NULL");
@@ -492,7 +465,7 @@ void box_free(void *metaptr, void *ptr)
         else if (node->used_slots[slot_index].state == BOX_FORMATTED)
         {
             // 如果槽位是子节点，继续向下查找
-            node = block_data(&meta->blocks, node->childs_blockid[slot_index]);
+            node = block_start(meta) + block_data_offset(&meta->blocks, node->childs_blockid[slot_index]);
             if (!node)
             {
                 LOG("Error: Child node is NULL");
@@ -530,7 +503,7 @@ void box_free(void *metaptr, void *ptr)
         if (node->max_obj_capacity != new_max)
         {
             node->max_obj_capacity = new_max;
-            box_head *parent = block_data(&meta->blocks, node->parent);
+            box_head_t *parent = block_start(meta) + block_data_offset(&meta->blocks, node->parent);
             update_parent(meta, parent, false, true);
         }
 
