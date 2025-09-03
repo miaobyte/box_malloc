@@ -11,7 +11,7 @@ include_directories(src)
 include(FetchContent)
 FetchContent_Declare(
     block_malloc
-    GIT_REPOSITORY https://github.com/miaobyte/block_malloc.git
+    GIT_REPOSITORY git@github.com:miaobyte/block_malloc.git
     GIT_TAG main # 替换为具体的分支或标签
 )
 FetchContent_MakeAvailable(block_malloc)

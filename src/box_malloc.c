@@ -348,7 +348,7 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
             // 目标体量属于当前level
 
             uint8_t target_slot = put_slots(meta, node, objsize);
-            LOG("Allocated at level %d, slot %d * %d", node->objlevel, target_slot, objsize.multiple);
+            LOG("Allocated at level %d, slot %d+%d", node->objlevel, target_slot, objsize.multiple-1);
             return obj_offset((obj_usage){
                 .level = node->objlevel,
                 .multiple = target_slot,
