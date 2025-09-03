@@ -12,7 +12,7 @@ include(FetchContent)
 FetchContent_Declare(
     block_malloc
     GIT_REPOSITORY git@github.com:miaobyte/block_malloc.git
-    GIT_TAG main # 替换为具体的分支或标签
+    GIT_TAG main
 )
 FetchContent_MakeAvailable(block_malloc)
 
