@@ -348,7 +348,7 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
             // 目标体量属于当前level
 
             uint8_t target_slot = put_slots(meta, node, objsize);
-            LOG("Allocated at level %d, slot %d+%d", node->objlevel, target_slot, objsize.multiple-1);
+            LOG("Allocated at level %d, slot %d+%d,size %d", node->objlevel, target_slot, objsize.multiple-1, obj_offset(objsize));
             return obj_offset((obj_usage){
                 .level = node->objlevel,
                 .multiple = target_slot,
@@ -492,7 +492,7 @@ void box_free(void *metaptr, void *box_start, const void *obj) {
     box_head_t *node = find_obj_node(meta, box_start, obj, &slot_index);
     
     if (!node) {
-        LOG("Error: Object not found in the boxmalloc");
+        LOG("Error free: Object not found");
         return;
     }
     
@@ -520,5 +520,5 @@ void box_free(void *metaptr, void *box_start, const void *obj) {
         }
     }
     
-    LOG("Object successfully freed");
+    LOG("Object freed");
 }
