@@ -434,82 +434,91 @@ void *box_alloc(void *metaptr,void *box_start,const size_t size)
 
     return box_start + offset;
 }
-void box_free(void *metaptr,void *box_start,const void *ptr)
-{
-    box_meta_t *meta = metaptr;
-
-    // 计算偏移量
-    uint64_t offset = ((uint8_t *)ptr - (uint8_t *)box_start) / 8;
-
+static box_head_t* find_obj_node(box_meta_t *meta, void *box_start, const void *obj, uint8_t *out_slot_index) {
+    // 计算字节偏移量
+    uint64_t byte_offset = (uint8_t *)obj - (uint8_t *)box_start;
+    
+    // 转换为8字节单位的偏移量
+    uint64_t unit_offset = byte_offset / 8;
+    
     // 获取根节点
     box_head_t *node = block_start(meta) + block_data_offset(&meta->blocks, 0);
-    if (!node)
-    {
+    if (!node) {
         LOG("Error: Root node is NULL");
+        return NULL;
+    }
+    
+    // 计算根节点的level
+    uint8_t current_level = node->objlevel;
+    
+    // 从高位向低位逐层查找
+    while (node && node->state == BOX_FORMATTED) {
+        // 计算当前层级的槽位索引
+        uint64_t divisor = 1;
+        for (int i = 0; i < current_level; i++) {
+            divisor *= 16;
+        }
+        
+        uint8_t slot_index = (unit_offset / divisor) % 16;
+        
+        // 检查该槽位的状态
+        if (node->used_slots[slot_index].state == OBJ_START) {
+            // 找到了对象的起始位置
+            *out_slot_index = slot_index;
+            return node;
+        } 
+        else if (node->used_slots[slot_index].state == BOX_FORMATTED) {
+            // 进入子节点继续查找
+            node = block_start(meta) + block_data_offset(&meta->blocks, node->childs_blockid[slot_index]);
+            current_level--;
+        } 
+        else {
+            // 该位置不是对象起始位置也不是子节点
+            LOG("Error: Invalid state %d at slot %d, level %d", 
+                node->used_slots[slot_index].state, slot_index, current_level);
+            return NULL;
+        }
+    }
+    
+    // 如果遍历完所有层级仍未找到对象
+    LOG("Error: Object not found in the box hierarchy");
+    return NULL;
+}
+void box_free(void *metaptr, void *box_start, const void *obj) {
+    box_meta_t *meta = metaptr;
+    uint8_t slot_index = 0;
+    
+    // 查找对象所在的节点和槽位
+    box_head_t *node = find_obj_node(meta, box_start, obj, &slot_index);
+    
+    if (!node) {
+        LOG("Error: Object not found in the boxmalloc");
         return;
     }
-
-    // 遍历找到目标节点
-    bool found = false;
-    uint8_t slot_index = 0;
-    while (!found)
-    {
-        slot_index = offset % 16; // 当前节点的槽位索引
-        offset /= 16;             // 计算父节点的偏移量
-
-        if (node->used_slots[slot_index].state == OBJ_START)
-        {
-            found = true;
+    
+    // 释放槽位
+    node->used_slots[slot_index].state = BOX_UNUSED;
+    node->used_slots[slot_index].continue_max = 16;
+    
+    // 释放连续的OBJ_CONTINUED槽位
+    for (int i = slot_index + 1; i < node->avliable_slot; i++) {
+        if (node->used_slots[i].state == OBJ_CONTINUED) {
+            node->used_slots[i].state = BOX_UNUSED;
+            node->used_slots[i].continue_max = 16;
+        } else {
             break;
         }
-        else if (node->used_slots[slot_index].state == BOX_FORMATTED)
-        {
-            // 如果槽位是子节点，继续向下查找
-            node = block_start(meta) + block_data_offset(&meta->blocks, node->childs_blockid[slot_index]);
-            if (!node)
-            {
-                LOG("Error: Child node is NULL");
-                return;
-            }
-        }
-        else
-        {
-            LOG("Error in free: Invalid state %d", node->used_slots[slot_index].state);
-            return;
-        }
     }
-    if (found)
-    {
-        // 释放槽位
-        node->used_slots[slot_index].state = BOX_UNUSED;
-        node->used_slots[slot_index].continue_max = 16;
-        for (int i = slot_index + 1; i < node->avliable_slot; i++)
-        {
-            if (node->used_slots[i].state == OBJ_CONTINUED)
-            {
-                node->used_slots[i].state = BOX_UNUSED;
-                node->used_slots[i].continue_max = 16;
-            }
-            else
-            {
-                break;
-            }
-        }
-
-        // 更新连续最大空闲槽位计数
-
-        // todo:
-        uint8_t new_max = box_continuous_max(node);
-        if (node->max_obj_capacity != new_max)
-        {
-            node->max_obj_capacity = new_max;
+    
+    // 更新连续最大空闲槽位计数
+    uint8_t new_max = box_continuous_max(node);
+    if (node->max_obj_capacity != new_max) {
+        node->max_obj_capacity = new_max;
+        if (node->parent >= 0) {
             box_head_t *parent = block_start(meta) + block_data_offset(&meta->blocks, node->parent);
             update_parent(meta, parent, false, true);
         }
-
-        LOG("Object successfully freed");
-    }else
-    {
-        LOG("Error: Object not found in the boxmalloc");
     }
+    
+    LOG("Object successfully freed");
 }
