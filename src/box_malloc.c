@@ -43,7 +43,6 @@ box区：
 3. box区是实际分配的内存区域，不存储任何元数据。
 */
 
-
 typedef struct
 {
     uint64_t buddysize; // 伙伴系统的总size
@@ -87,11 +86,12 @@ typedef struct
 
 static void box_format(box_meta_t *meta, box_head_t *node, uint8_t objlevel, uint8_t avliable_slot, int32_t parent_id);
 
-static void *block_start(void *meta){
+static void *block_start(void *meta)
+{
     return meta + sizeof(box_meta_t);
 }
 
-int box_init(void *metaptr,const size_t buddysize,const size_t box_size)
+int box_init(void *metaptr, const size_t buddysize, const size_t box_size)
 {
     if (box_size % 8 != 0)
     {
@@ -109,10 +109,11 @@ int box_init(void *metaptr,const size_t buddysize,const size_t box_size)
         .buddysize = buddysize,
         .box_size = box_size,
     };
- 
-    blocks_init(&meta->blocks,buddysize - sizeof(box_meta_t), sizeof(box_head_t));
-    int64_t block_id = blocks_alloc(&meta->blocks,block_start(meta)); // 分配根节点
-    if(block_id<0){
+
+    blocks_init(&meta->blocks, buddysize - sizeof(box_meta_t), sizeof(box_head_t));
+    int64_t block_id = blocks_alloc(&meta->blocks, block_start(meta)); // 分配根节点
+    if (block_id < 0)
+    {
         LOG("Failed to allocate root block");
         return -1;
     }
@@ -174,7 +175,6 @@ static void box_format(box_meta_t *meta, box_head_t *node, uint8_t objlevel, uin
 
     // parent
     node->parent = parent_id;
-   
 }
 static obj_usage box_max_obj_capacity(box_head_t *node)
 {
@@ -348,7 +348,7 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
             // 目标体量属于当前level
 
             uint8_t target_slot = put_slots(meta, node, objsize);
-            LOG("Allocated at level %d, slot %d+%d,size %d", node->objlevel, target_slot, objsize.multiple-1, obj_offset(objsize));
+            LOG("Allocated at level %d, slot %d+%d,size %d", node->objlevel, target_slot, objsize.multiple - 1, obj_offset(objsize));
             return obj_offset((obj_usage){
                 .level = node->objlevel,
                 .multiple = target_slot,
@@ -360,18 +360,32 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
             box_head_t *child = NULL;
             for (int i = 0; i < node->avliable_slot; i++)
             {
-                if (node->childs_blockid[i] < 0)
+                if (node->childs_blockid[i] >= 0)
+                {
+                    child = block_start(meta) + block_data_offset(&meta->blocks, node->childs_blockid[i]);
+                    obj_usage child_max = box_max_obj_capacity(child);
+                    if (compare_obj_usage(child_max, objsize) >= 0)
+                    {
+                        uint64_t offset = obj_offset((obj_usage){
+                            .level = node->objlevel,
+                            .multiple = i,
+                        });
+                        return offset + box_find_alloc(meta, child, node, objsize);
+                    }
+                }
+                else if (node->used_slots[i].state == BOX_UNUSED) // 添加检查：确保slot空闲
                 {
                     // 需要分配出来
                     int64_t child_block_id = blocks_alloc(&(meta->blocks), block_start(meta));
-                    if(child_block_id<0){
+                    if (child_block_id < 0)
+                    {
                         LOG("Failed to allocate root block");
-                        return -1;
+                        return BOX_FAILED;
                     }
                     node->childs_blockid[i] = child_block_id;
                     child = block_start(meta) + block_data_offset(&meta->blocks, child_block_id);
 
-                    int64_t cur_block_id =   block_id_bydataoffset(&meta->blocks, (void*)node - block_start(meta));
+                    int64_t cur_block_id = block_id_bydataoffset(&meta->blocks, (void *)node - block_start(meta));
                     box_format(meta, child, node->objlevel - 1, 16, cur_block_id);
 
                     // 更新node中的child信息
@@ -382,20 +396,16 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
                     {
                         node->max_obj_capacity = new_max;
                     }
-                }
-                else
-                {
-                    child = block_start(meta) + block_data_offset(&meta->blocks, node->childs_blockid[i]);
-                }
 
-                obj_usage child_max = box_max_obj_capacity(child);
-                if (compare_obj_usage(child_max, objsize) >= 0)
-                {
-                    uint64_t offset = obj_offset((obj_usage){
-                        .level = node->objlevel,
-                        .multiple = i,
-                    });
-                    return offset + box_find_alloc(meta, child, node, objsize);
+                    obj_usage child_max = box_max_obj_capacity(child);
+                    if (compare_obj_usage(child_max, objsize) >= 0)
+                    {
+                        uint64_t offset = obj_offset((obj_usage){
+                            .level = node->objlevel,
+                            .multiple = i,
+                        });
+                        return offset + box_find_alloc(meta, child, node, objsize);
+                    }
                 }
             }
 
@@ -409,7 +419,7 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
     return BOX_FAILED;
 }
 
-void *box_alloc(void *metaptr,void *box_start,const size_t size)
+void *box_alloc(void *metaptr, void *box_start, const size_t size)
 {
     obj_usage aligned_objsize = align_to((size + 8 - 1) / 8);
 
@@ -434,91 +444,106 @@ void *box_alloc(void *metaptr,void *box_start,const size_t size)
 
     return box_start + offset;
 }
-static box_head_t* find_obj_node(box_meta_t *meta, void *box_start, const void *obj, uint8_t *out_slot_index) {
+static box_head_t *find_obj_node(box_meta_t *meta, void *box_start, const void *obj, uint8_t *out_slot_index)
+{
     // 计算字节偏移量
     uint64_t byte_offset = (uint8_t *)obj - (uint8_t *)box_start;
-    
+
     // 转换为8字节单位的偏移量
     uint64_t unit_offset = byte_offset / 8;
-    
+
     // 获取根节点
     box_head_t *node = block_start(meta) + block_data_offset(&meta->blocks, 0);
-    if (!node) {
+    if (!node)
+    {
         LOG("Error: Root node is NULL");
         return NULL;
     }
-    
+
     // 计算根节点的level
     uint8_t current_level = node->objlevel;
-    
+
     // 从高位向低位逐层查找
-    while (node && node->state == BOX_FORMATTED) {
+    while (node && node->state == BOX_FORMATTED)
+    {
         // 计算当前层级的槽位索引
         uint64_t divisor = 1;
-        for (int i = 0; i < current_level; i++) {
+        for (int i = 0; i < current_level; i++)
+        {
             divisor *= 16;
         }
-        
+
         uint8_t slot_index = (unit_offset / divisor) % 16;
-        
+
         // 检查该槽位的状态
-        if (node->used_slots[slot_index].state == OBJ_START) {
+        if (node->used_slots[slot_index].state == OBJ_START)
+        {
             // 找到了对象的起始位置
             *out_slot_index = slot_index;
             return node;
-        } 
-        else if (node->used_slots[slot_index].state == BOX_FORMATTED) {
+        }
+        else if (node->used_slots[slot_index].state == BOX_FORMATTED)
+        {
             // 进入子节点继续查找
             node = block_start(meta) + block_data_offset(&meta->blocks, node->childs_blockid[slot_index]);
             current_level--;
-        } 
-        else {
+        }
+        else
+        {
             // 该位置不是对象起始位置也不是子节点
-            LOG("Error: Invalid state %d at slot %d, level %d", 
+            LOG("Error: Invalid state %d at slot %d, level %d",
                 node->used_slots[slot_index].state, slot_index, current_level);
             return NULL;
         }
     }
-    
+
     // 如果遍历完所有层级仍未找到对象
     LOG("Error: Object not found in the box hierarchy");
     return NULL;
 }
-void box_free(void *metaptr, void *box_start, const void *obj) {
+void box_free(void *metaptr, void *box_start, const void *obj)
+{
     box_meta_t *meta = metaptr;
     uint8_t slot_index = 0;
-    
+
     // 查找对象所在的节点和槽位
     box_head_t *node = find_obj_node(meta, box_start, obj, &slot_index);
-    
-    if (!node) {
+
+    if (!node)
+    {
         LOG("Error free: Object not found");
         return;
     }
-    
+
     // 释放槽位
     node->used_slots[slot_index].state = BOX_UNUSED;
     node->used_slots[slot_index].continue_max = 16;
-    
+
     // 释放连续的OBJ_CONTINUED槽位
-    for (int i = slot_index + 1; i < node->avliable_slot; i++) {
-        if (node->used_slots[i].state == OBJ_CONTINUED) {
+    for (int i = slot_index + 1; i < node->avliable_slot; i++)
+    {
+        if (node->used_slots[i].state == OBJ_CONTINUED)
+        {
             node->used_slots[i].state = BOX_UNUSED;
             node->used_slots[i].continue_max = 16;
-        } else {
+        }
+        else
+        {
             break;
         }
     }
-    
+
     // 更新连续最大空闲槽位计数
     uint8_t new_max = box_continuous_max(node);
-    if (node->max_obj_capacity != new_max) {
+    if (node->max_obj_capacity != new_max)
+    {
         node->max_obj_capacity = new_max;
-        if (node->parent >= 0) {
+        if (node->parent >= 0)
+        {
             box_head_t *parent = block_start(meta) + block_data_offset(&meta->blocks, node->parent);
             update_parent(meta, parent, false, true);
         }
     }
-    
+
     LOG("Object freed");
 }
