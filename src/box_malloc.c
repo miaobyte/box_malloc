@@ -8,41 +8,6 @@
 #include "obj_offset.h"
 #include "logutil.h"
 
-/*
-内存布局示意图：
-
-meta区：
-+-------------------+  box_meta_t 描述整个伙伴系统
-|   +-------------+ |
-|   | buddysize    | |  伙伴系统的总大小
-|   | box_size     | |  box区的总大小
-|   | blocks_meta_t| |  blocks的元数据
-|   +-------------+ |  blocks区，存储 block_t 和 box_head_t
-|   | block_t0    | |  每个 block 的元数据
-|   | box_head_t[0] | |  描述第0个 box 的状态和结构
-|   +-------------+ |
-|   | block_t1    | |  每个 block 的元数据
-|   | box_head_t[1] | |  描述第1个 box 的状态和结构
-|   +-------------+ |
-|   | block_t2    | |  每个 block 的元数据
-|   | box_head_t[2] | |  描述第2个 box 的状态和结构
-|   | ...         | |
-|   +-------------+ |
-+-------------------+  <-- meta区结束，box区开始
-
-box区：
-+-------------------+  <-- 起始地址 (box_root)
-|   box 数据区      |  存储实际分配的对象，不包含任何 meta 信息
-|                   |
-|                   |
-+-------------------+  <-- box区结束
-
-说明：
-1. meta区和 box区 地址互相独立。
-2. meta区存储 box_meta_t 和 blocks 的元数据，用于管理 box 的分配。
-3. box区是实际分配的内存区域，不存储任何元数据。
-*/
-
 typedef struct
 {
     uint64_t buddysize; // 伙伴系统的总size
@@ -345,7 +310,7 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
     {
         if (objsize.level == node->objlevel)
         {
-            // 目标体量属于当前level
+            // 目标体量属于当前level，且剩余slots满足obj，直接在当前node的slots中分配
 
             uint8_t target_slot = put_slots(meta, node, objsize);
             LOG("Allocated at level %d, slot %d+%d,size %d", node->objlevel, target_slot, objsize.multiple - 1, obj_offset(objsize));
@@ -356,7 +321,8 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
         }
         else if (objsize.level < node->objlevel)
         {
-            // 目标体量<当前level，查找子节点
+            // 目标体量<当前level，继续查找子节点
+            // TODO，slots
             box_head_t *child = NULL;
             for (int i = 0; i < node->avliable_slot; i++)
             {
@@ -375,7 +341,7 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
                 }
                 else if (node->used_slots[i].state == BOX_UNUSED) // 添加检查：确保slot空闲
                 {
-                    // 需要分配出来
+                    // 需要新建child box_head_t
                     int64_t child_block_id = blocks_alloc(&(meta->blocks), block_start(meta));
                     if (child_block_id < 0)
                     {
@@ -383,7 +349,8 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
                         return BOX_FAILED;
                     }
                     node->childs_blockid[i] = child_block_id;
-                    child = block_start(meta) + block_data_offset(&meta->blocks, child_block_id);
+
+                    child = block_start(meta) + block_data_offset(&meta->blocks, node->childs_blockid[i]);
 
                     int64_t cur_block_id = block_id_bydataoffset(&meta->blocks, (void *)node - block_start(meta));
                     box_format(meta, child, node->objlevel - 1, 16, cur_block_id);
@@ -397,7 +364,12 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
                         node->max_obj_capacity = new_max;
                     }
 
-                    obj_usage child_max = box_max_obj_capacity(child);
+                    // 判断新child box的容量
+
+                    obj_usage child_max = (obj_usage){
+                        .level = child->objlevel + 1,
+                        .multiple = 1,
+                    };
                     if (compare_obj_usage(child_max, objsize) >= 0)
                     {
                         uint64_t offset = obj_offset((obj_usage){
