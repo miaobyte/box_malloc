@@ -24,6 +24,7 @@ int main()
     size_t sizes[] = {4, 34,346, 2355, 673, 3348};
     int num_sizes = sizeof(sizes) / sizeof(sizes[0]);
     clock_t start = clock();
+    
     // 分配内存
     for (int i = 0; i < NUM_ALLOCS; i++)
     {

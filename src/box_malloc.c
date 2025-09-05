@@ -60,13 +60,13 @@ int box_init(void *metaptr, const size_t buddysize, const size_t box_size)
 {
     if (box_size % 8 != 0)
     {
-        LOG("box_size must be aligned to 8. Given size: %zu", box_size);
+        LOG("[ERROR] box_size must be aligned to 8. Given size: %zu", box_size);
         return -1;
     }
     obj_usage rounded_size_t = align_to(box_size / 8);
     if (box_size != obj_offset(rounded_size_t))
     {
-        LOG("box_size must be aligned to 16. Given size: %zu", box_size);
+        LOG("[ERROR] box_size must be aligned to 16. Given size: %zu", box_size);
         return -1;
     }
     box_meta_t *meta = metaptr;
@@ -79,19 +79,13 @@ int box_init(void *metaptr, const size_t buddysize, const size_t box_size)
     int64_t block_id = blocks_alloc(&meta->blocks, block_start(meta)); // 分配根节点
     if (block_id < 0)
     {
-        LOG("Failed to allocate root block");
+        LOG("[ERROR] failed to allocate root block");
         return -1;
     }
 
     box_head_t *root_boxhead = block_start(meta) + block_data_offset(&meta->blocks, block_id);
-    if (!root_boxhead)
-    {
-        LOG("Failed to allocate root node");
-        return -1;
-    }
-
     box_format(meta, root_boxhead, rounded_size_t.level, rounded_size_t.multiple, -1);
-    LOG("box_init success");
+    LOG("[INFO] box_init success");
     return 0;
 }
 static uint8_t box_continuous_max(box_head_t *node)
@@ -118,7 +112,6 @@ static uint8_t box_continuous_max(box_head_t *node)
 static void box_format(box_meta_t *meta, box_head_t *node, uint8_t objlevel, uint8_t avliable_slot, int32_t parent_id)
 {
     node->state = BOX_FORMATTED;
-
     node->objlevel = objlevel;
 
     // obj,childbox usage
@@ -163,8 +156,9 @@ static obj_usage box_max_obj_capacity(box_head_t *node)
     }
 }
 
-static void update_parent(box_meta_t *meta, box_head_t *node, bool slotstate_changed, bool slot_mac_obj_capacity_changed)
+static void update_parent(box_meta_t *meta, box_head_t *node, bool slotstate_changed, bool slot_max_obj_capacity_changed)
 {
+
     if (slotstate_changed)
     {
         uint8_t newcontinuous_max = box_continuous_max(node);
@@ -177,12 +171,12 @@ static void update_parent(box_meta_t *meta, box_head_t *node, bool slotstate_cha
             slotstate_changed = false;
         }
     }
-    if (slot_mac_obj_capacity_changed)
+    if (slot_max_obj_capacity_changed)
     {
         if (node->max_obj_capacity > 0)
         {
             // 当前节点还有空闲槽，child_max_obj_capacity不变
-            slot_mac_obj_capacity_changed = false;
+            slot_max_obj_capacity_changed = false;
         }
         else
         {
@@ -198,7 +192,7 @@ static void update_parent(box_meta_t *meta, box_head_t *node, bool slotstate_cha
                     child = block_start(meta) + block_data_offset(&meta->blocks, node->childs_blockid[i]);
                     if (!child)
                     {
-                        LOG("Error: Child node should not be NULL");
+                        LOG("[ERROR] child node should not be NULL");
                         return;
                     }
                     obj_usage childmax = box_max_obj_capacity(child);
@@ -214,16 +208,16 @@ static void update_parent(box_meta_t *meta, box_head_t *node, bool slotstate_cha
             }
             else
             {
-                slot_mac_obj_capacity_changed = false;
+                slot_max_obj_capacity_changed = false;
             }
         }
     }
-    if (slotstate_changed || slot_mac_obj_capacity_changed)
+    if (slotstate_changed || slot_max_obj_capacity_changed)
     {
         if (node->parent >= 0)
         {
             box_head_t *parent = block_start(meta) + block_data_offset(&meta->blocks, node->parent);
-            update_parent(meta, parent, slotstate_changed, slot_mac_obj_capacity_changed);
+            update_parent(meta, parent, slotstate_changed, slot_max_obj_capacity_changed);
         }
     }
 }
@@ -261,7 +255,7 @@ static uint8_t put_slots(box_meta_t *meta, box_head_t *node, obj_usage objsize)
     if (!found)
     {
         // 通常不会执行到这里，因为调用此函数前，已经确保有足够的连续空闲槽
-        LOG("Error: Not enough continuous free slots");
+        LOG("[ERROR] not enough continuous free slots");
         return 0;
     }
 
@@ -303,7 +297,7 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
 {
     if (!node)
     {
-        LOG("Error: Node is NULL");
+        LOG("[ERROR] node is NULL");
         return BOX_FAILED; // 表示分配失败
     }
     if (node->state == BOX_FORMATTED)
@@ -313,11 +307,13 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
             // 目标体量属于当前level，且剩余slots满足obj，直接在当前node的slots中分配
 
             uint8_t target_slot = put_slots(meta, node, objsize);
-            LOG("Allocated at level %d, slot %d+%d,size %d", node->objlevel, target_slot, objsize.multiple - 1, obj_offset(objsize));
-            return obj_offset((obj_usage){
+            uint64_t offset= obj_offset((obj_usage){
                 .level = node->objlevel,
                 .multiple = target_slot,
             });
+            LOG("[INFO] allocated at level %d, slot [%d,%d],size %d",node->objlevel, target_slot, target_slot+objsize.multiple - 1, obj_offset(objsize));
+            
+            return offset;
         }
         else if (objsize.level < node->objlevel)
         {
@@ -336,7 +332,13 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
                             .level = node->objlevel,
                             .multiple = i,
                         });
-                        return offset + box_find_alloc(meta, child, node, objsize);
+                        uint64_t target_box= box_find_alloc(meta, child, node, objsize);
+                        if (target_box == BOX_FAILED)
+                        {
+                            LOG("[ERROR] box_find_alloc failed");
+                            return BOX_FAILED;
+                        }
+                        return offset + target_box;
                     }
                 }
                 else if (node->used_slots[i].state == BOX_UNUSED) // 添加检查：确保slot空闲
@@ -345,7 +347,7 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
                     int64_t child_block_id = blocks_alloc(&(meta->blocks), block_start(meta));
                     if (child_block_id < 0)
                     {
-                        LOG("Failed to allocate root block");
+                        LOG("[ERROR] failed to create box_head for child");
                         return BOX_FAILED;
                     }
                     node->childs_blockid[i] = child_block_id;
@@ -376,44 +378,51 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
                             .level = node->objlevel,
                             .multiple = i,
                         });
-                        return offset + box_find_alloc(meta, child, node, objsize);
+                        uint64_t target_box= box_find_alloc(meta, child, node, objsize);
+                        if (target_box == BOX_FAILED)
+                        {
+                            LOG("[ERROR]:box_find_alloc failed");
+                            return BOX_FAILED;
+                        }
+                        return offset + target_box;
                     }
                 }
             }
 
-            LOG("Error:Bug happen");
+            LOG("[ERROR] bug happen,but should not happen");
             return BOX_FAILED;
         }
     }
 
-    // 如果执行到这里，说明没有找到合适的空间
-    LOG("Error:Bug happen");
+    // 如果执行到这里,需要联系开发者
+    LOG("[ERROR] bug happen,but should not happen");
     return BOX_FAILED;
 }
 
 void *box_alloc(void *metaptr, void *box_start, const size_t size)
 {
+    if (!metaptr||!box_start)
+    {
+        LOG("[ERROR] root or box_start must not NULL");
+        return NULL;
+    };
+
     obj_usage aligned_objsize = align_to((size + 8 - 1) / 8);
 
     box_meta_t *meta = metaptr;
     box_head_t *root = block_start(meta) + block_data_offset(&meta->blocks, 0);
-    if (!root)
-    {
-        LOG("Error: Root is NULL");
-        return NULL;
-    };
-
+    
     obj_usage max_capacity = box_max_obj_capacity(root);
 
     if (compare_obj_usage(aligned_objsize, max_capacity) > 0)
     {
-        LOG("Error: Requested size %zu is too large for the box system", size);
+        LOG("[ERROR] requested size %zu is too large for the box", size);
         return NULL;
     }
     uint64_t offset = box_find_alloc(meta, root, NULL, aligned_objsize);
     if (offset == BOX_FAILED)
         return NULL;
-
+    LOG("[INFO] object allocated at offset %lu", offset);
     return box_start + offset;
 }
 static box_head_t *find_obj_node(box_meta_t *meta, void *box_start, const void *obj, uint8_t *out_slot_index)
@@ -428,7 +437,7 @@ static box_head_t *find_obj_node(box_meta_t *meta, void *box_start, const void *
     box_head_t *node = block_start(meta) + block_data_offset(&meta->blocks, 0);
     if (!node)
     {
-        LOG("Error: Root node is NULL");
+        LOG("[ERROR] root node is NULL");
         return NULL;
     }
 
@@ -463,14 +472,14 @@ static box_head_t *find_obj_node(box_meta_t *meta, void *box_start, const void *
         else
         {
             // 该位置不是对象起始位置也不是子节点
-            LOG("Error: Invalid state %d at slot %d, level %d",
+            LOG("[ERROR] bug happen,invalid state %d at slot %d, level %d",
                 node->used_slots[slot_index].state, slot_index, current_level);
             return NULL;
         }
     }
 
     // 如果遍历完所有层级仍未找到对象
-    LOG("Error: Object not found in the box hierarchy");
+    LOG("[ERROR] object+%lu not found", byte_offset);
     return NULL;
 }
 void box_free(void *metaptr, void *box_start, const void *obj)
@@ -479,11 +488,12 @@ void box_free(void *metaptr, void *box_start, const void *obj)
     uint8_t slot_index = 0;
 
     // 查找对象所在的节点和槽位
+    uint64_t byte_offset = (uint8_t *)obj - (uint8_t *)box_start;
     box_head_t *node = find_obj_node(meta, box_start, obj, &slot_index);
 
     if (!node)
     {
-        LOG("Error free: Object not found");
+        LOG("[ERROR] free failed: object+%lu not found", byte_offset);
         return;
     }
 
@@ -517,5 +527,5 @@ void box_free(void *metaptr, void *box_start, const void *obj)
         }
     }
 
-    LOG("Object freed");
+    LOG("[INFO] object+%lu freed", byte_offset);
 }
