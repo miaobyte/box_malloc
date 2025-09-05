@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <block_malloc/block_malloc.h>
 
@@ -8,13 +9,41 @@
 #include "obj_offset.h"
 #include "logutil.h"
 
+static void rlock(_Atomic int64_t *lock) {
+    while (__atomic_exchange_n(lock, 1, __ATOMIC_ACQUIRE) == 2) {
+        // 自旋等待写锁释放
+    }
+}
+
+static void runlock(_Atomic int64_t *lock) {
+    __atomic_store_n(lock, 0, __ATOMIC_RELEASE);
+}
+
+static void lock(_Atomic int64_t *lock) {
+    while (__atomic_exchange_n(lock, 2, __ATOMIC_ACQUIRE) != 0) {
+        // 自旋等待锁释放
+    }
+}
+
+static void unlock(_Atomic int64_t *lock) {
+    __atomic_store_n(lock, 0, __ATOMIC_RELEASE);
+}
+
 typedef struct
 {
+    #define BOX_MAGIC "box_malloc"
+    uint8_t magic[10]; // "box_malloc"
     uint64_t buddysize; // 伙伴系统的总size
     uint64_t box_size;  // 总内存大小，不可变，内存长度必须=16^n*x,n>=1，x=[1,15]
     blocks_meta_t blocks;
 } box_meta_t;
 
+static int check_magic(box_meta_t *meta) {
+    if (memcmp(meta->magic, BOX_MAGIC, sizeof(meta->magic)) != 0) {
+        return -1;
+    }
+    return 0;
+}
 typedef enum
 {
     BOX_UNUSED = 0,    // 未用（可以分配 obj、box）
@@ -33,6 +62,10 @@ typedef struct
 {
     uint8_t state : 2;           // 0=未用（可以分配obj、box）,1=已格式化为box，2=obj
     int8_t max_obj_capacity : 6; // 连续的最大空闲obj,[0~16]
+
+    // lock
+    _Atomic int64_t rw_lock;  // 0=无锁，1=读锁，2=写锁（简化实现）
+
     // parent
     int32_t parent; // parent_blockid
 
@@ -58,6 +91,11 @@ static void *block_start(void *meta)
 
 int box_init(void *metaptr, const size_t buddysize, const size_t box_size)
 {
+    if(check_magic((box_meta_t *)metaptr) == 0) {
+        LOG("[ERROR] box_meta_t already initialized");
+        return -1;
+    }
+
     if (box_size % 8 != 0)
     {
         LOG("[ERROR] box_size must be aligned to 8. Given size: %zu", box_size);
@@ -85,9 +123,18 @@ int box_init(void *metaptr, const size_t buddysize, const size_t box_size)
 
     box_head_t *root_boxhead = block_start(meta) + block_data_offset(&meta->blocks, block_id);
     box_format(meta, root_boxhead, rounded_size_t.level, rounded_size_t.multiple, -1);
+    
+    memcpy(meta->magic, BOX_MAGIC, sizeof(meta->magic));
     LOG("[INFO] box_init success");
     return 0;
 }
+/*
+ * 线程安全需求：
+ * - 需要读锁：只读取槽位状态，不修改。
+ * - 锁粒度：node 级，获取当前节点的读锁。
+ * - 锁顺序：单个节点。
+ * - 并发性：允许多个线程同时计算同一节点。
+ */
 static uint8_t box_continuous_max(box_head_t *node)
 {
     uint8_t continuous_count = 0;
@@ -109,6 +156,13 @@ static uint8_t box_continuous_max(box_head_t *node)
         continuous_max = continuous_count;
     return continuous_max;
 }
+/*
+ * 线程安全需求：
+ * - 需要写锁：初始化节点状态。
+ * - 锁粒度：node 级，获取当前节点的写锁。
+ * - 锁顺序：单个节点。
+ * - 并发性：不同节点的格式化可以并发。
+*/
 static void box_format(box_meta_t *meta, box_head_t *node, uint8_t objlevel, uint8_t avliable_slot, int32_t parent_id)
 {
     node->state = BOX_FORMATTED;
@@ -134,6 +188,13 @@ static void box_format(box_meta_t *meta, box_head_t *node, uint8_t objlevel, uin
     // parent
     node->parent = parent_id;
 }
+/*
+ * 线程安全需求：
+ * - 需要读锁：只读取节点容量信息，不修改。
+ * - 锁粒度：node 级，获取当前节点的读锁。
+ * - 锁顺序：单个节点。
+ * - 并发性：允许多个线程同时读取。
+ */
 static obj_usage box_max_obj_capacity(box_head_t *node)
 {
     if (node->max_obj_capacity > 0)
@@ -155,7 +216,13 @@ static obj_usage box_max_obj_capacity(box_head_t *node)
         return node->child_max_obj_capacity;
     }
 }
-
+/*
+ * 线程安全需求：
+ * - 需要写锁：修改父节点状态。
+ * - 锁粒度：node 级，递归获取当前节点的写锁。
+ * - 锁顺序：从叶到根逐级获取锁。
+ * - 并发性：不同分支的更新可以并发。
+ */
 static void update_parent(box_meta_t *meta, box_head_t *node, bool slotstate_changed, bool slot_max_obj_capacity_changed)
 {
 
@@ -221,7 +288,13 @@ static void update_parent(box_meta_t *meta, box_head_t *node, bool slotstate_cha
         }
     }
 }
-
+/*
+ * 线程安全需求：
+ * - 需要写锁：修改节点的槽位状态。
+ * - 锁粒度：node 级，获取当前节点的写锁。
+ * - 锁顺序：单个节点，无递归。
+ * - 并发性：不同节点的 put_slots 可以并发。
+ */
 static uint8_t put_slots(box_meta_t *meta, box_head_t *node, obj_usage objsize)
 {
     uint8_t target_slot = 0;
@@ -292,7 +365,13 @@ box内存分配模型，最小单元为8byte，按16为比例分割和分配内�
 其有2块区域
 meta区，存放box_meta和box_head数组
 data区，存放实际的box数据，完全分配给obj（需要向上对齐），不会存放任何结构体的meta信息
-*/
+
+ * 线程安全需求：
+ * - 需要写锁：修改节点状态（分配子节点或槽位）。
+ * - 锁粒度：node 级，递归获取当前节点的写锁。
+ * - 锁顺序：从根到叶逐级获取锁。
+ * - 并发性：不同分支可以并发查找/分配。
+ */
 static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *parent, obj_usage objsize)
 {
     if (!node)
@@ -311,7 +390,7 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
                 .level = node->objlevel,
                 .multiple = target_slot,
             });
-            LOG("[INFO] allocated at level %d, slot [%d,%d],size %d",node->objlevel, target_slot, target_slot+objsize.multiple - 1, obj_offset(objsize));
+            LOG("[INFO] allocated at level %d, slot [%d,%d],size %lu",node->objlevel, target_slot, target_slot+objsize.multiple - 1, obj_offset(objsize));
             
             return offset;
         }
@@ -425,6 +504,13 @@ void *box_alloc(void *metaptr, void *box_start, const size_t size)
     LOG("[INFO] object allocated at offset %lu", offset);
     return box_start + offset;
 }
+/*
+ * 线程安全需求：
+ * - 需要读锁：只读取节点状态，不修改。
+ * - 锁粒度：node 级，递归获取从根到目标节点的读锁。
+ * - 锁顺序：从根到叶逐级获取锁。
+ * - 并发性：允许多个线程同时查找同一分支。
+ */
 static box_head_t *find_obj_node(box_meta_t *meta, void *box_start, const void *obj, uint8_t *out_slot_index)
 {
     // 计算字节偏移量
