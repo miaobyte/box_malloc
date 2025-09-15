@@ -41,10 +41,6 @@ box深度为8，时间复杂度为O(8*(1~16）)=O(8~128)
 释放obj时，box_malloc会检查所在node slots的状态，发现node的slots全部空闲，则释放该node，并递归检查和释放其parent node，直到root node
 */
 
-#ifndef BOX_MALLOC_H
-#define BOX_MALLOC_H
-
-#include <stddef.h>
 
 /*
 内存布局示意图：
@@ -80,6 +76,11 @@ box区：
 2. meta区存储 box_meta_t 和 blocks 的元数据，用于管理 box 的分配。
 3. box区是实际分配的内存区域，不存储任何元数据。
 */
+
+#ifndef BOX_MALLOC_H
+#define BOX_MALLOC_H
+
+#include <stddef.h>
 
 int box_init(void *metaptr,const size_t buddysize,const size_t box_size);
 void *box_alloc(void *metaptr,void *box_start,const size_t size);
