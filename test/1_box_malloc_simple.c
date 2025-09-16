@@ -10,18 +10,18 @@ void test_boxinit(void* metaptr){
 int main(int argc, char *argv[]) {
 
     uint8_t *buddy = malloc(1024*1024);
-
+    
     uint8_t *data = malloc(1024*1024*16);
     test_boxinit(buddy);
 
-    void* p5=box_alloc(buddy,data,5);
-    void* p23=box_alloc(buddy,data,23);
-    box_free(buddy,data,p23);
-   
-    void* p7=box_alloc(buddy,data,7);
+    uint64_t p5=box_alloc(buddy,5);
+    uint64_t p23=box_alloc(buddy,23);
+    box_free(buddy,p23);
 
-    box_free(buddy,data,p5);
-    box_free(buddy,data,p7);
+    uint64_t p7=box_alloc(buddy,7);
+
+    box_free(buddy,p5);
+    box_free(buddy,p7);
 
     free(buddy);
     free(data);

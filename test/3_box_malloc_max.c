@@ -37,8 +37,8 @@ int main() {
 
     int alloc_count = 0;
     while (1) {
-        void *ptr = box_alloc(buddy, data, SMALL_OBJ_SIZE);
-        if (ptr == NULL) {
+        uint64_t obj_offset = box_alloc(buddy,  SMALL_OBJ_SIZE);
+        if (obj_offset == UINT64_MAX-1) {
             break;  // 分配失败，box已满
         }
         if (alloc_count >= capacity) {
@@ -51,8 +51,8 @@ int main() {
                 return 1;
             }
         }
-        ptrs[alloc_count] = ptr;
-        *(uint64_t *)ptr = alloc_count;  // 写入数据
+        ptrs[alloc_count] = data + obj_offset;
+        *(uint64_t *)ptrs[alloc_count] = alloc_count;  // 写入数据
         alloc_count++;
     }
     printf("Allocated %d small objects\n", alloc_count);
@@ -69,11 +69,12 @@ int main() {
         void *ptr_to_free = ptrs[random_index];
 
         // Free 随机对象
-        box_free(buddy, data, ptr_to_free);
+        u_int64_t offset = (uint8_t *)ptr_to_free - data;
+        box_free(buddy, offset);
 
         // 立即 Malloc 一个新的小对象
-        void *new_ptr = box_alloc(buddy, data, SMALL_OBJ_SIZE);
-        if (new_ptr == NULL) {
+        uint64_t new_ptr = box_alloc(buddy, SMALL_OBJ_SIZE);
+        if (new_ptr == UINT64_MAX-1) {
             printf("Re-allocation failed at loop %lld\n", loop_count);
             break;  // 如果分配失败，退出循环
         }
@@ -94,7 +95,8 @@ int main() {
 
     // 清理
     for (int i = 0; i < alloc_count; i++) {
-        box_free(buddy, data, ptrs[i]);
+        u_int64_t offset= (uint8_t *)ptrs[i] - data;
+        box_free(buddy, offset);
     }
     free(ptrs);
     free(buddy);

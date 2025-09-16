@@ -29,14 +29,14 @@ int main()
     for (int i = 0; i < NUM_ALLOCS; i++)
     {
         size_t size = sizes[i % num_sizes];
-        void *ptr = box_alloc(buddy, data, size);
-        if (ptr == NULL)
+        uint64_t obj_offset = box_alloc(buddy,  size);
+        if (obj_offset == UINT64_MAX-1)
         {
             printf("box_alloc failed at iteration %d\n", i);
             return 1;
         }
-        *(uint64_t *)ptr = i;
-        offsets[i] = (uint8_t *)ptr - data;
+        *(uint64_t *)(data + obj_offset) = i;
+        offsets[i] = obj_offset;
     }
 
     // 释放内存
@@ -45,7 +45,7 @@ int main()
  
         uint64_t actual = *(uint64_t *)(data + offsets[i]);
         printf("stored value = %lu\n",actual);
-        box_free(buddy, data, data + offsets[i]);
+        box_free(buddy, offsets[i]);
     }
 
     clock_t end = clock();
