@@ -73,15 +73,15 @@ int main() {
         box_free(buddy, offset);
 
         // 立即 Malloc 一个新的小对象
-        uint64_t new_ptr = box_alloc(buddy, SMALL_OBJ_SIZE);
-        if (new_ptr == UINT64_MAX-1) {
+        uint64_t new_offset = box_alloc(buddy, SMALL_OBJ_SIZE);
+        if (new_offset == UINT64_MAX-1) {
             printf("Re-allocation failed at loop %lld\n", loop_count);
             break;  // 如果分配失败，退出循环
         }
 
         // 更新指针数组
-        ptrs[random_index] = new_ptr;
-        *(uint64_t *)new_ptr = random_index;
+        ptrs[random_index] =  data + new_offset;
+        *(uint64_t *)ptrs[random_index] = random_index;
 
         loop_count++;
 

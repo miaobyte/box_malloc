@@ -32,7 +32,7 @@ static void unlock(_Atomic int64_t *lock) {
 typedef struct
 {
     #define BOX_MAGIC "box_malloc"
-    uint8_t magic[10]; // "box_malloc"
+    uint8_t magic[16]; // "box_malloc"
     uint64_t boxhead_bytessize; // 伙伴系统的总size
     uint64_t box_bytessize;  // 总内存大小，不可变，内存长度必须=16^n*x,n>=1，x=[1,15]
     blocks_meta_t blocks;
