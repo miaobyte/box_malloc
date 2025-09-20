@@ -124,7 +124,7 @@ int box_init(void *metaptr, const size_t boxhead_bytessize, const size_t box_byt
     box_head_t *root_boxhead = boxhead + blockdata_offset(&meta->blocks, block_id);
     box_format(meta, root_boxhead, rounded_size_t.level, rounded_size_t.multiple, -1);
     
-    memcpy(meta->magic, BOX_MAGIC, sizeof(meta->magic));
+    memcpy(meta->magic, BOX_MAGIC, sizeof(BOX_MAGIC));
     LOG("[INFO] box_init success");
     return 0;
 }
