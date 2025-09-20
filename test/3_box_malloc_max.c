@@ -3,7 +3,7 @@
 #include <time.h>
 #include <stdint.h>
 
-#include "box_malloc.h"
+#include <box_malloc/box_malloc.h>
 
 #define SMALL_OBJ_SIZE 8  // 小对象大小 <=8byte
 

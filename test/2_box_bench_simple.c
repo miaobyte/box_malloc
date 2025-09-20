@@ -3,7 +3,7 @@
 #include <time.h>
 #include <stdint.h>
 
-#include "box_malloc.h"
+#include <box_malloc/box_malloc.h>
 
 #define NUM_ALLOCS 111
 

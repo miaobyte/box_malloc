@@ -1,0 +1,77 @@
+# 这是一个用于 CMake 项目在多个平台上运行的入门工作流。如果只需要单个平台，请查看：https://github.com/actions/starter-workflows/blob/main/ci/cmake-single-platform.yml
+name: CMake 在多个平台上运行
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      # 设置 fail-fast 为 false，以确保为所有矩阵组合提供反馈。当工作流稳定时，可以将其更改为 true。
+      fail-fast: false
+
+      # 设置矩阵以运行以下 3 种配置：
+      # 1. <Windows, Release, 默认运行器映像上的最新 MSVC 编译器工具链，默认生成器>
+      # 2. <Linux, Release, 默认运行器映像上的最新 GCC 编译器工具链，默认生成器>
+      # 3. <Linux, Release, 默认运行器映像上的最新 Clang 编译器工具链，默认生成器>
+      #
+      # 要添加更多构建类型（Release、Debug、RelWithDebInfo 等），请自定义 build_type 列表。
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build_type: [Release]
+        c_compiler: [gcc, clang]
+        include:
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+          - os: ubuntu-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+          - os: macos-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+        exclude:
+          # 排除 macOS 的 gcc 配置，避免兼容性问题
+          - os: macos-latest
+            c_compiler: gcc
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: 设置可重用字符串
+      # 将重复输入字符串（例如构建输出目录）转换为步骤输出。这些步骤输出可以在整个工作流文件中使用。
+      id: strings
+      shell: bash
+      run: |
+        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
+    - name: 清理并准备构建目录
+      shell: bash
+      # 参考 build_debug.sh，清理旧构建目录并创建新目录
+      run: |
+        rm -rf ${{ steps.strings.outputs.build-output-dir }}
+        mkdir -p ${{ steps.strings.outputs.build-output-dir }}
+
+    - name: 配置 CMake
+      # 在 'build' 子目录中配置 CMake。`CMAKE_BUILD_TYPE` 仅在使用单配置生成器（如 make）时需要。
+      # 请参阅 https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: >
+        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -S ${{ github.workspace }}
+
+    - name: 构建
+      # 使用给定配置构建程序。请注意，--config 是必需的，因为默认的 Windows 生成器是多配置生成器（Visual Studio 生成器）。
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+
+    - name: 测试
+      working-directory: ${{ steps.strings.outputs.build-output-dir }}
+      # 执行 CMake 配置定义的测试。请注意，--build-config 是必需的，因为默认的 Windows 生成器是多配置生成器（Visual Studio 生成器）。
+      # 有关更多详细信息，请参阅 https://cmake.org/cmake/help/latest/manual/ctest.1.html
+      run: ctest --build-config ${{ matrix.build_type }}

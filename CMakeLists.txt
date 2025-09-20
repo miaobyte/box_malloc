@@ -11,7 +11,7 @@ include_directories(src)
 include(FetchContent)
 FetchContent_Declare(
     block_malloc
-    GIT_REPOSITORY git@github.com:miaobyte/block_malloc.git
+    GIT_REPOSITORY https://github.com/miaobyte/block_malloc.git
     GIT_TAG main
 )
 FetchContent_MakeAvailable(block_malloc)
@@ -25,8 +25,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 target_link_libraries(box_malloc block_malloc)
 
+target_include_directories(box_malloc PRIVATE ${block_malloc_SOURCE_DIR}/include)
+
 add_subdirectory(test)
 
 # 安装目标和头文件
-install(TARGETS box_malloc DESTINATION lib/box_malloc)
-install(DIRECTORY include/ DESTINATION include/box_malloc)
+install(TARGETS box_malloc DESTINATION lib)
+install(DIRECTORY include/ DESTINATION include)

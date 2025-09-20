@@ -2,31 +2,34 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #include <block_malloc/block_malloc.h>
 
-#include "box_malloc.h"
+#include <box_malloc/box_malloc.h>
 #include "obj_offset.h"
 #include "logutil.h"
 
-static void rlock(_Atomic int64_t *lock) {
-    while (__atomic_exchange_n(lock, 1, __ATOMIC_ACQUIRE) == 2) {
-        // 自旋等待写锁释放
+static void rlock(atomic_int_fast64_t *lock) {
+    int_fast64_t expected = 0;
+    while (!atomic_compare_exchange_weak(lock, &expected, 1)) {
+        expected = 0;  // 重置 expected
     }
 }
 
-static void runlock(_Atomic int64_t *lock) {
-    __atomic_store_n(lock, 0, __ATOMIC_RELEASE);
+static void runlock(atomic_int_fast64_t *lock) {
+    atomic_store(lock, 0);
 }
 
-static void lock(_Atomic int64_t *lock) {
-    while (__atomic_exchange_n(lock, 2, __ATOMIC_ACQUIRE) != 0) {
-        // 自旋等待锁释放
+static void lock(atomic_int_fast64_t *lock) {
+    int_fast64_t expected = 0;
+    while (!atomic_compare_exchange_weak(lock, &expected, 2)) {
+        expected = 0;
     }
 }
 
-static void unlock(_Atomic int64_t *lock) {
-    __atomic_store_n(lock, 0, __ATOMIC_RELEASE);
+static void unlock(atomic_int_fast64_t *lock) {
+    atomic_store(lock, 0);
 }
 
 typedef struct
@@ -64,7 +67,7 @@ typedef struct
     int8_t max_obj_capacity : 6; // 连续的最大空闲obj,[0~16]
 
     // lock
-    _Atomic int64_t rw_lock;  // 0=无锁，1=读锁，2=写锁（简化实现）
+    atomic_int_fast64_t rw_lock;  // 0=无锁，1=读锁，2=写锁（简化实现）
 
     // parent
     int32_t parent; // parent_blockid
