@@ -7,39 +7,10 @@
 #include <block_malloc/block_malloc.h>
 
 #include <box_malloc/box_malloc.h>
-#include "obj_offset.h"
+#include "obj_usage.h"
 #include "logutil.h"
-
-static void rlock(atomic_int_fast64_t *lock) {
-    int_fast64_t expected = 0;
-    while (!atomic_compare_exchange_weak(lock, &expected, 1)) {
-        expected = 0;  // 重置 expected
-    }
-}
-
-static void runlock(atomic_int_fast64_t *lock) {
-    atomic_store(lock, 0);
-}
-
-static void lock(atomic_int_fast64_t *lock) {
-    int_fast64_t expected = 0;
-    while (!atomic_compare_exchange_weak(lock, &expected, 2)) {
-        expected = 0;
-    }
-}
-
-static void unlock(atomic_int_fast64_t *lock) {
-    atomic_store(lock, 0);
-}
-
-typedef struct
-{
-    #define BOX_MAGIC "box_malloc"
-    uint8_t magic[16]; // "box_malloc"
-    uint64_t boxhead_bytessize; // 伙伴系统的总size
-    uint64_t box_bytessize;  // 总内存大小，不可变，内存长度必须=16^n*x,n>=1，x=[1,15]
-    blocks_meta_t blocks;
-} box_meta_t;
+#include "lock.h"
+#include "box.h"
 
 static int check_magic(box_meta_t *meta) {
     if (memcmp(meta->magic, BOX_MAGIC, sizeof(meta->magic)) != 0) {
@@ -47,43 +18,6 @@ static int check_magic(box_meta_t *meta) {
     }
     return 0;
 }
-typedef enum
-{
-    BOX_UNUSED = 0,    // 未用（可以分配 obj、box）
-    BOX_FORMATTED = 1, // box 已格式化
-    OBJ_START = 2,     // obj_start
-    OBJ_CONTINUED = 3  // obj_continued
-} BoxState;
-
-typedef struct
-{
-    uint8_t state : 2;       // 0=未用（可以分配obj、box）,1=已格式化为box，2=obj
-    int8_t continue_max : 6; // 连续的最大空闲obj,[0~16]
-} __attribute__((packed)) box_child_t;
-
-typedef struct
-{
-    uint8_t state : 2;           // 0=未用（可以分配obj、box）,1=已格式化为box，2=obj
-    int8_t max_obj_capacity : 6; // 连续的最大空闲obj,[0~16]
-
-    // lock
-    atomic_int_fast64_t rw_lock;  // 0=无锁，1=读锁，2=写锁（简化实现）
-
-    // parent
-    int32_t parent; // parent_blockid
-
-    // box
-    uint8_t objlevel; //[0,16] boxlevel=本层的objlevel+1
-
-    // obj,childbox usage
-    uint8_t avliable_slot;            // 【2，16】
-    obj_usage child_max_obj_capacity; // 下层的最大对象容量
-    box_child_t used_slots[16];
-
-    // childbox
-    int32_t childs_blockid[16];
-
-} __attribute__((packed)) box_head_t; //
 
 static void box_format(box_meta_t *meta, box_head_t *node, uint8_t objlevel, uint8_t avliable_slot, int32_t parent_id);
 
@@ -113,7 +47,7 @@ int box_init(void *metaptr, const size_t boxhead_bytessize, const size_t box_byt
 
     blocks_init(&meta->blocks, boxhead_bytessize - sizeof(box_meta_t), sizeof(box_head_t));
 
-    void *boxhead=meta+sizeof(box_meta_t);
+    void *boxhead=(void *)meta+sizeof(box_meta_t);
     int64_t block_id = blocks_alloc(&meta->blocks, boxhead); // 分配根节点
     if (block_id < 0)
     {
@@ -266,7 +200,7 @@ static void update_parent(box_meta_t *meta, box_head_t *node, bool slotstate_cha
         }
     }
 
-    void *boxhead=meta+sizeof(box_meta_t);
+    void *boxhead=(void*)meta+sizeof(box_meta_t);
 
     if (slot_max_obj_capacity_changed)
     {
@@ -378,7 +312,7 @@ static uint8_t put_slots(box_meta_t *meta, box_head_t *node, obj_usage objsize)
 
     uint8_t continuous_max = box_continuous_max(node);
 
-    void *boxhead=meta+sizeof(box_meta_t);
+    void *boxhead=(void*)meta+sizeof(box_meta_t);
     if (node->max_obj_capacity != continuous_max)
     {
         // 发生变化，递归更新parent的child
@@ -410,7 +344,7 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
         LOG("[ERROR] node is NULL");
         return BOX_FAILED; // 表示分配失败
     }
-    void *boxhead=meta+sizeof(box_meta_t);
+    void *boxhead=(void *)meta+sizeof(box_meta_t);
     if (node->state == BOX_FORMATTED)
     {
         if (objsize.level == node->objlevel)
@@ -525,7 +459,7 @@ uint64_t box_alloc(void *metaptr, const size_t size)
     obj_usage aligned_objsize = align_to((size + 8 - 1) / 8);
 
     box_meta_t *meta = metaptr;
-    void *boxhead=meta+sizeof(box_meta_t);
+    void *boxhead=(void*)meta+sizeof(box_meta_t);
     box_head_t *root = boxhead+ blockdata_offset(&meta->blocks, 0);
     
     obj_usage max_capacity = box_and_child_max_obj_capacity(root);
@@ -554,7 +488,7 @@ static box_head_t *find_obj_node(box_meta_t *meta, const uint64_t obj_offset, ui
     uint64_t unit_offset = obj_offset / 8;
 
     // 获取根节点
-    void *boxhead=meta+sizeof(box_meta_t);
+    void *boxhead=(void*)meta+sizeof(box_meta_t);
     box_head_t *node = boxhead + blockdata_offset(&meta->blocks, 0);
     if (!node)
     {
@@ -638,7 +572,7 @@ void box_free(void *metaptr, const uint64_t obj_offset)
 
     // 更新连续最大空闲槽位计数
     uint8_t new_max = box_continuous_max(node);
-    void *boxhead=meta+sizeof(box_meta_t);
+    void *boxhead=(void*)meta+sizeof(box_meta_t);
     if (node->max_obj_capacity != new_max)
     {
         node->max_obj_capacity = new_max;

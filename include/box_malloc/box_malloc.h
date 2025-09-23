@@ -81,6 +81,7 @@ box区：
 #define BOX_MALLOC_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 int box_init(void *metaptr,  const size_t boxhead_bytessize, const size_t box_bytessize);
 uint64_t box_alloc(void *metaptr,const size_t size);

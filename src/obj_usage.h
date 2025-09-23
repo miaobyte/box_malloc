@@ -1,3 +1,6 @@
+#ifndef OBJ_USAGE_H
+#define OBJ_USAGE_H
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -69,3 +72,5 @@ static uint64_t obj_offset(const obj_usage a)
     offset *= (a.multiple);
     return offset;
 }
+
+#endif // OBJ_USAGE_H
