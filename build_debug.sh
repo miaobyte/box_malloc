@@ -11,4 +11,4 @@ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make
 
 # 安装
-make install
+# make install

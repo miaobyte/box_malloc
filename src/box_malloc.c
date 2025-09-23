@@ -501,7 +501,7 @@ uint64_t box_alloc(void *metaptr, const size_t size)
 
     if (compare_obj_usage(aligned_objsize, max_capacity) > 0)
     {
-        LOG("[ERROR] requested size %zu is too large for the box", size);
+        LOG("[ERROR] requested size %zu is too large for the box[8*16^%u * %u", size,max_capacity.level, max_capacity.multiple);
         return BOX_FAILED;
     }
     uint64_t offset = box_find_alloc(meta, root, NULL, aligned_objsize);
