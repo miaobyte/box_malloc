@@ -178,7 +178,10 @@ static void box_format(box_meta_t *meta, box_head_t *node, uint8_t objlevel, uin
             .state = BOX_UNUSED,
         };
     }
-
+    node->child_max_obj_capacity = (obj_usage){
+        .level =objlevel,
+        .multiple =1,
+    };
     // childbox
     for (int i = 0; i < 16; i++)
     {
@@ -216,6 +219,30 @@ static obj_usage box_max_obj_capacity(box_head_t *node)
         return node->child_max_obj_capacity;
     }
 }
+
+static obj_usage box_and_child_max_obj_capacity(box_head_t *node)
+{
+    // 计算“本节点自身槽位”可提供的最大容量
+    obj_usage own;
+
+    if (node->max_obj_capacity == 16)
+    {
+        own.level = node->objlevel + 1;
+        own.multiple = 1;
+    }
+    else
+    {
+        own.level = node->objlevel;
+        own.multiple = node->max_obj_capacity;
+    }
+ 
+    // 子树聚合得到的最大容量
+    obj_usage child = node->child_max_obj_capacity;
+
+    // 返回两者中的更大者
+    return compare_obj_usage(own, child) >= 0 ? own : child;
+}
+
 /*
  * 线程安全需求：
  * - 需要写锁：修改父节点状态。
@@ -265,7 +292,7 @@ static void update_parent(box_meta_t *meta, box_head_t *node, bool slotstate_cha
                         LOG("[ERROR] child node should not be NULL");
                         return;
                     }
-                    obj_usage childmax = box_max_obj_capacity(child);
+                    obj_usage childmax = box_and_child_max_obj_capacity(child);
                     if (compare_obj_usage(childmax, newmax) > 0)
                         newmax = childmax;
                 }
@@ -409,7 +436,7 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
                 if (node->childs_blockid[i] >= 0)
                 {
                     child = boxhead + blockdata_offset(&meta->blocks, node->childs_blockid[i]);
-                    obj_usage child_max = box_max_obj_capacity(child);
+                    obj_usage child_max = box_and_child_max_obj_capacity(child);
                     if (compare_obj_usage(child_max, objsize) >= 0)
                     {
                         uint64_t offset = obj_offset((obj_usage){
@@ -443,11 +470,15 @@ static uint64_t box_find_alloc(box_meta_t *meta, box_head_t *node, box_head_t *p
 
                     // 更新node中的child信息
                     node->used_slots[i].state = BOX_FORMATTED;
+                    node->used_slots[i].continue_max = 0;
                     // 更新node中的max_obj_capacity
                     uint8_t new_max = box_continuous_max(node);
                     if (node->max_obj_capacity != new_max)
                     {
                         node->max_obj_capacity = new_max;
+                        if (parent) {
+                            update_parent(meta, parent, true, false);
+                        }
                     }
 
                     // 判断新child box的容量
@@ -497,7 +528,7 @@ uint64_t box_alloc(void *metaptr, const size_t size)
     void *boxhead=meta+sizeof(box_meta_t);
     box_head_t *root = boxhead+ blockdata_offset(&meta->blocks, 0);
     
-    obj_usage max_capacity = box_max_obj_capacity(root);
+    obj_usage max_capacity = box_and_child_max_obj_capacity(root);
 
     if (compare_obj_usage(aligned_objsize, max_capacity) > 0)
     {
