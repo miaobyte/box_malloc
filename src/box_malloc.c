@@ -501,7 +501,7 @@ uint64_t box_alloc(void *metaptr, const size_t size)
 
     if (compare_obj_usage(aligned_objsize, max_capacity) > 0)
     {
-        LOG("[ERROR] requested size %zu is too large for the box[8*16^%u * %u", size,max_capacity.level, max_capacity.multiple);
+        LOG("[ERROR] requested size[%u*%u] is too large for the box[8*16^%u * %u]", aligned_objsize.level,aligned_objsize.multiple,max_capacity.level, max_capacity.multiple);
         return BOX_FAILED;
     }
     uint64_t offset = box_find_alloc(meta, root, NULL, aligned_objsize);
@@ -620,3 +620,37 @@ void box_free(void *metaptr, const uint64_t obj_offset)
 
     LOG("[INFO] object+%lu freed", obj_offset);
 }
+
+uint64_t box_allocated_size(void *metaptr, const uint64_t obj_offset)
+{
+    if (!metaptr)
+        return 0;
+
+    box_meta_t *meta = metaptr;
+    uint8_t slot_index = 0;
+    box_head_t *node = find_obj_node(meta, obj_offset, &slot_index);
+    if (!node)
+        return 0; // 未找到
+
+    // 计算该对象占据的连续槽位数
+    uint8_t count = 1;
+    for (int i = slot_index + 1; i < node->avliable_slot; i++)
+    {
+        if (node->used_slots[i].state == OBJ_CONTINUED)
+            count++;
+        else
+            break;
+    }
+
+    // 使用 obj_usage + obj_offset 复用对齐/计算逻辑
+    obj_usage usage;
+    if (count == 16) {
+        // 连续占满16个槽，表示上层的一个单元
+        usage.level = node->objlevel + 1;
+        usage.multiple = 1;
+    } else {
+        usage.level = node->objlevel;
+        usage.multiple = count;
+    }
+
+    return obj_offset(usage);

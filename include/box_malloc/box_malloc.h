@@ -84,6 +84,7 @@ box区：
 
 int box_init(void *metaptr,  const size_t boxhead_bytessize, const size_t box_bytessize);
 uint64_t box_alloc(void *metaptr,const size_t size);
+uint64_t box_allocated_size(void *metaptr, const uint64_t obj_offset);
 void box_free(void *metaptr, const uint64_t obj_offset);
 
 #endif // BOX_MALLOC_H
