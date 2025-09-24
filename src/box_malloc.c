@@ -652,14 +652,14 @@ void box_free(void *metaptr, const uint64_t obj_offset)
     LOG("[INFO] object+%lu freed", obj_offset);
 }
 
-uint64_t box_allocated_size(void *metaptr, const uint64_t obj_offset)
+uint64_t box_allocated_size(void *metaptr, const uint64_t obj_off)
 {
     if (!metaptr)
         return 0;
 
     box_meta_t *meta = metaptr;
     uint8_t slot_index = 0;
-    box_head_t *node = find_obj_node(meta, obj_offset, &slot_index);
+    box_head_t *node = find_obj_node(meta, obj_off, &slot_index);
     if (!node)
         return 0; // 未找到
 
@@ -685,3 +685,4 @@ uint64_t box_allocated_size(void *metaptr, const uint64_t obj_offset)
     }
 
     return obj_offset(usage);
+}
