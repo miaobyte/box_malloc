@@ -13,7 +13,7 @@
 #include "box.h"
 
 static int check_magic(box_meta_t *meta) {
-    if (memcmp(meta->magic, BOX_MAGIC, sizeof(meta->magic)) != 0) {
+    if (memcmp(meta->magic, BOX_MAGIC, sizeof(BOX_MAGIC)-1) != 0) {
         return -1;
     }
     return 0;
@@ -58,7 +58,8 @@ int box_init(void *metaptr, const size_t boxhead_bytessize, const size_t box_byt
     box_head_t *root_boxhead = boxhead + blockdata_offset(&meta->blocks, block_id);
     box_format(meta, root_boxhead, rounded_size_t.level, rounded_size_t.multiple, -1);
     
-    memcpy(meta->magic, BOX_MAGIC, sizeof(BOX_MAGIC));
+    memset(meta->magic, 0, sizeof(meta->magic));
+    memcpy(meta->magic, BOX_MAGIC, sizeof(BOX_MAGIC)-1);
     LOG("[INFO] box_init success");
     return 0;
 }
