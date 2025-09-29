@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/box_mallocTargets.cmake")
+
+# Provide a hint where block_malloc is expected to be found via CMake config
+if(NOT TARGET block_malloc::block_malloc)
+    find_package(block_malloc CONFIG REQUIRED)
+endif()

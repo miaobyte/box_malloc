@@ -69,7 +69,7 @@ int main() {
         void *ptr_to_free = ptrs[random_index];
 
         // Free 随机对象
-        u_int64_t offset = (uint8_t *)ptr_to_free - data;
+        uint64_t offset = (uint8_t *)ptr_to_free - data;
         box_free(buddy, offset);
 
         // 立即 Malloc 一个新的小对象
@@ -95,7 +95,7 @@ int main() {
 
     // 清理
     for (int i = 0; i < alloc_count; i++) {
-        u_int64_t offset= (uint8_t *)ptrs[i] - data;
+        uint64_t offset= (uint8_t *)ptrs[i] - data;
         box_free(buddy, offset);
     }
     free(ptrs);
