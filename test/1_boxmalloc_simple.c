@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include <box_malloc/box_malloc.h>
+#include <boxmalloc/boxmalloc.h>
 
 void test_boxinit(void* metaptr){
     box_init(metaptr,1024*1024, 1024*1024*16);

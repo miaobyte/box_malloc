@@ -1,13 +1,13 @@
 #ifndef BOX_H
 #define BOX_H
 
-#include <block_malloc/block_malloc.h>
+#include <blockmalloc/blockmalloc.h>
 #include "obj_usage.h"
 
 typedef struct
 {
-    #define BOX_MAGIC "box_malloc"
-    uint8_t magic[16]; // "box_malloc"
+    #define BOX_MAGIC "boxmalloc"
+    uint8_t magic[16]; // "boxmalloc"
     uint64_t boxhead_bytessize; // 伙伴系统的总size
     uint64_t box_bytessize;  // 总内存大小，不可变，内存长度必须=16^n*x,n>=1，x=[1,15]
     blocks_meta_t blocks;

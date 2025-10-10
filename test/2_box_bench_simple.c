@@ -3,20 +3,20 @@
 #include <time.h>
 #include <stdint.h>
 
-#include <box_malloc/box_malloc.h>
+#include <boxmalloc/boxmalloc.h>
 
 #define NUM_ALLOCS 111
 
 int main()
 {
 
-    // 初始化 box_malloc 的元数据和数据区
+    // 初始化 boxmalloc 的元数据和数据区
     uint8_t *buddy = malloc(1024 * 1024);     // 元数据区
     uint8_t *data = malloc(1024 * 1024 * 16); // 数据区
-    // 初始化 box_malloc
+    // 初始化 boxmalloc
     if (box_init(buddy, 1024 * 1024, 1024 * 1024 * 16) != 0)
     {
-        printf("Failed to initialize box_malloc\n");
+        printf("Failed to initialize boxmalloc\n");
         return 1;
     }
 

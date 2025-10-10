@@ -1,15 +1,15 @@
 /*
-box_malloc 是一个基于伙伴系统（buddy system）的存储分配器，用于高效管理任意size的obj。
+boxmalloc 是一个基于伙伴系统（buddy system）的存储分配器，用于高效管理任意size的obj。
 它接收两块独立的完整内存：meta区（存储管理box系统的元数据）和obj区（存放实际obj数据），初始化后不再支持扩展2个区域的大小。
 
 box可以看作16叉树，obj可以占据连续的几个树子节点，一旦被obj占据，则不能再分割子树。
 
-box_malloc的设计灵感来自于现实世界的包装箱系统
+boxmalloc的设计灵感来自于现实世界的包装箱系统
 大包装箱（外箱）可嵌套小包装箱（内箱），形成多层结构。
 物品需要按其体积大小选择合适的包装箱进行存放。
 
-box_malloc的设计目标，不仅仅是作为程序的内存分配器，还希望能成为oskernel、block设备的存储分配器，提供高效的obj分配和释放功能。
-同时，box_malloc是一个被动的obj分配器，需要被外部调用，不会主动整理和移动对象。
+boxmalloc的设计目标，不仅仅是作为程序的内存分配器，还希望能成为oskernel、block设备的存储分配器，提供高效的obj分配和释放功能。
+同时，boxmalloc是一个被动的obj分配器，需要被外部调用，不会主动整理和移动对象。
 
 关于meta区：
 meta区依赖block_malloc(https://github.com/miaobyte/block_malloc)。
@@ -23,7 +23,7 @@ obj区通常可以达到非常高的利用率，在任何分配状态下，如�
 
 关于obj分配：
 最小分配单元为8字节，按16的幂次方进行对齐，支持动态分配和释放对象
-box_malloc并不对obj的size进行优化适配，各种size的obj均可分配。
+boxmalloc并不对obj的size进行优化适配，各种size的obj均可分配。
 16叉树的设计，相比其它伙伴系统的2叉
 
 16叉深度更低，但是在每个深度，可能都需要遍历1-16个子节点。
@@ -38,7 +38,7 @@ box深度为8，时间复杂度为O(8*(1~16）)=O(8~128)
 二叉树深度为32，时间复杂度为O(32*(1~2))=O(32~64)
 
 关于obj释放：
-释放obj时，box_malloc会检查所在node slots的状态，发现node的slots全部空闲，则释放该node，并递归检查和释放其parent node，直到root node
+释放obj时，boxmalloc会检查所在node slots的状态，发现node的slots全部空闲，则释放该node，并递归检查和释放其parent node，直到root node
 */
 
 

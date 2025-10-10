@@ -4,9 +4,9 @@
 #include <string.h>
 #include <stdatomic.h>
 
-#include <block_malloc/block_malloc.h>
+#include <blockmalloc/blockmalloc.h>
 
-#include <box_malloc/box_malloc.h>
+#include <boxmalloc/boxmalloc.h>
 #include "obj_usage.h"
 #include "logutil.h"
 #include "lock.h"

@@ -1,4 +1,4 @@
-box-malloc (0.1.0-1) unstable; urgency=medium
+boxmalloc (0.1.0-1) unstable; urgency=medium
 
   * Initial release.
 

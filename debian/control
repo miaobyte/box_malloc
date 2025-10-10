@@ -1,21 +1,21 @@
-Source: box-malloc
+Source: boxmalloc
 Section: libs
 Priority: optional
 Maintainer: miaobyte <peng.li24@nio.com>
-Build-Depends: debhelper (>= 12), cmake, libblock-malloc2-dev
+Build-Depends: debhelper (>= 12), cmake, libblockmalloc2-dev
 Standards-Version: 4.5.0
 
-Package: libbox-malloc2
+Package: libboxmalloc2
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends},libblock-malloc2
+Depends: ${shlibs:Depends}, ${misc:Depends},libblockmalloc2
 Description: 16-way buddy-style fixed-block allocator library
  A compact shared library implementing a 16-ary buddy allocator for
  allocating fixed/aligned objects. The runtime package contains the
  shared library(s) needed by programs.
 
-Package: libbox-malloc2-dev
+Package: libboxmalloc2-dev
 Section: libdevel
 Architecture: any
-Depends: libbox-malloc2 (= ${binary:Version}), libblock-malloc2-dev, ${misc:Depends}
-Description: development files for libbox-malloc2
- Header files and pkg-config metadata for developing against libbox-malloc2.
+Depends: libboxmalloc2 (= ${binary:Version}), libblockmalloc2-dev, ${misc:Depends}
+Description: development files for libboxmalloc2
+ Header files and pkg-config metadata for developing against libboxmalloc2.
