@@ -12,7 +12,7 @@ boxmalloc的设计目标，不仅仅是作为程序的内存分配器，还希�
 同时，boxmalloc是一个被动的obj分配器，需要被外部调用，不会主动整理和移动对象。
 
 关于meta区：
-meta区依赖block_malloc(https://github.com/miaobyte/block_malloc)。
+meta区依赖blockmalloc(https://github.com/miaobyte/blockmalloc)。
 meta区的大小=sizeof(box_meta_t)+boxcount*sizeof(box_head_t)
 meta区的大小约束了box的node数量，进而约束了obj的数量，需要根据实际需求进行合理配置
 

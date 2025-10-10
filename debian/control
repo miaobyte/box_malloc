@@ -2,8 +2,9 @@ Source: boxmalloc
 Section: libs
 Priority: optional
 Maintainer: miaobyte <peng.li24@nio.com>
-Build-Depends: debhelper (>= 12), cmake, libblockmalloc2-dev
+Build-Depends: debhelper (>= 12), cmake, build-essential,libblockmalloc2-dev
 Standards-Version: 4.5.0
+Homepage: https://github.com/miaobyte/boxmalloc
 
 Package: libboxmalloc2
 Architecture: any
