@@ -6,8 +6,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 include(GNUInstallDirs)
-
-find_package(blockmalloc CONFIG REQUIRED)
+include(FetchContent)
+find_package(blockmalloc CONFIG QUIET)
 
 # library
 add_library(boxmalloc SHARED
@@ -33,7 +33,27 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(boxmalloc PRIVATE ENABLE_LOG)
 endif()
 
-target_link_libraries(boxmalloc PRIVATE blockmalloc::blockmalloc)
+## Link to blockmalloc: prefer the imported namespaced target, fall back to in-tree target.
+if(TARGET blockmalloc::blockmalloc)
+    target_link_libraries(boxmalloc PRIVATE blockmalloc::blockmalloc)
+elseif(TARGET blockmalloc)
+    target_link_libraries(boxmalloc PRIVATE blockmalloc)
+else()
+    message(STATUS "blockmalloc not found via find_package or in-tree; attempting FetchContent download")
+    FetchContent_Declare(
+        blockmalloc
+        GIT_REPOSITORY https://github.com/miaobyte/blockmalloc.git
+        GIT_TAG        main
+    )
+    FetchContent_MakeAvailable(blockmalloc)
+    if(TARGET blockmalloc::blockmalloc)
+        target_link_libraries(boxmalloc PRIVATE blockmalloc::blockmalloc)
+    elseif(TARGET blockmalloc)
+        target_link_libraries(boxmalloc PRIVATE blockmalloc)
+    else()
+        message(FATAL_ERROR "Could not locate blockmalloc target after FetchContent. Please install blockmalloc or adjust the dependency.")
+    endif()
+endif()
 
 add_subdirectory(test)
 
