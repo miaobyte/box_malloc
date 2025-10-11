@@ -41,9 +41,9 @@ include(FetchContent)
 # blockmalloc
 find_package(blockmalloc CONFIG QUIET)
 if(blockmalloc_FOUND)
-    message(STATUS "Found blockmalloc via find_package")
+    message(STATUS "find_package(blockmalloc) ok")
 else()
-    message(STATUS "blockmalloc not found;FetchContent download")
+    message(STATUS "find_package(blockmalloc) failed;FetchContent download")
     FetchContent_Declare(
         blockmalloc
         GIT_REPOSITORY https://github.com/miaobyte/blockmalloc.git
