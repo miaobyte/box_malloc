@@ -23,7 +23,7 @@ set_target_properties(boxmalloc PROPERTIES
 # include paths: public for users, private for build
 target_include_directories(boxmalloc
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_SOURCE_DIR}/src
