@@ -64,34 +64,5 @@ endif()
 
 add_subdirectory(test)
 
-# install
-install(TARGETS boxmalloc
-    EXPORT boxmallocTargets
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-)
-
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-
-# Export targets and generate CMake config package
-include(CMakePackageConfigHelpers)
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/boxmallocConfigVersion.cmake"
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY AnyNewerVersion
-)
-
-configure_file(
-    "${CMAKE_CURRENT_LIST_DIR}/cmake/BoxmallocConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/boxmallocConfig.cmake"
-    @ONLY
-)
-
-install(EXPORT boxmallocTargets
-    FILE boxmallocTargets.cmake
-    NAMESPACE boxmalloc::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/boxmalloc-${PROJECT_VERSION}
-)
-
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/boxmallocConfig.cmake"
-              "${CMAKE_CURRENT_BINARY_DIR}/boxmallocConfigVersion.cmake"
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/boxmalloc-${PROJECT_VERSION})
+# 将安装/打包相关配置委托到 cmake/packagex.cmake 以便复用和打包脚本共享
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/packagex.cmake")
